@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+requests
+loguru
+pdf2image
+easyocr
+langchain

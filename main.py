@@ -1,10 +1,64 @@
 from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import requests
-import logging
-
+from loguru import logger
+from pdf2image import convert_from_path
+from fastapi import FastAPI, UploadFile, File
+from langchain.llms import GooglePalm
+from langchain import PromptTemplate, HuggingFaceHub, LLMChain
+import json
+import easyocr
+from typing import List
 
 app = FastAPI()
+origins = ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Initialize OCR reader
+reader = easyocr.Reader(['en'])
+
+# Initialize GooglePalm
+Palm = GooglePalm(temperature=0, 
+                 model="models/text-bison-001", 
+                 google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+
+
+# Initialize LLMChain
+template = '''Extract the desired information from the following passage.
+
+Only extract the properties mentioned in the 'information_extraction' function.
+
+Passage:
+{raw_text}
+
+schema = {{
+    "properties" : {{
+        "name" : {{"type" : "string"}},
+        "email" : {{"type" : "string"}},
+        "age" : {{"type" : "string"}},
+        "height" : {{"type" : "integer"}},
+        "weight" : {{"type" : "integer"}},
+        "phone" : {{"type" : "integer"}},
+        "gender" : {{"type" : "string"}},
+        "address" : {{"type" : "string"}}
+    }},
+    "required" : ["name" , "email" , "age" , "height" , "weight" , "phone" , "gender" , "address"]
+}}
+
+Note: If values or not extracted Make them ''.
+'''
+
+
+prompt = PromptTemplate(template=template, input_variables=["raw_text"])
+llm_chain = LLMChain(prompt=prompt, llm=Palm)
 
 properties = {
     'base_url': "https://na-1-dev.api.opentext.com",
@@ -15,6 +69,20 @@ properties = {
     'client_id': "eph2Is82hQZ6ltgrP4NjLgBuM96261Fv",
     'client_secret': "0p5Pz6MaHEThN1MV"
 }
+
+def process_pdf(file_path):
+    logger.info(file_path)
+    images = convert_from_path("mypdf.pdf", 500,poppler_path=file_path)
+    for i, image in enumerate(images):
+        fname = 'image'+str(i)+'.png'
+        image.save(fname, "PNG")
+    raw_string = ""
+    for i, image in enumerate(images):
+        image.save(f'page{i}.jpg', 'JPEG')
+        result = reader.readtext(f'page{i}.jpg')
+        labels = [bbox_label[1] for bbox_label in result]
+        raw_string += ' '.join(labels)
+    return raw_string
 
 def get_auth_token():
     print("...Requesting New Authentication Token")
@@ -124,4 +192,35 @@ async def process_upload(file: UploadFile = File(...)):
  
 
     return tme_results
+
+
+@app.post("/extract_info/")
+async def extract_info(files: List[UploadFile] = File(...)):
+    extracted_info = []
+
+    for uploaded_file in files:
+        file_extension = uploaded_file.filename.split(".")[-1]
+        
+        # Save the uploaded file
+        file_path = f"uploads/{uploaded_file.filename}"
+        with open(file_path, "wb") as buffer:
+            buffer.write(uploaded_file.file.read())
+        
+        if file_extension.lower() in ['png', 'jpg', 'jpeg']:
+            result = reader.readtext(file_path)
+            labels = [bbox_label[1] for bbox_label in result]
+            raw_string = ' '.join(labels)
+        elif file_extension.lower() == 'pdf':
+            raw_string = process_pdf(file_path)
+            pass
+        else:
+            return {"error": "Unsupported file format"}
+        
+        # Run LLMChain
+        res = llm_chain.run(raw_string)
+        info = json.loads(res)
+        extracted_info.append(info)
+    
+    return {"extracted_info": extracted_info}
+
 
