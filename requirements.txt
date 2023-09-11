@@ -6,3 +6,6 @@ pdf2image
 easyocr
 langchain
 gunicorn==21.2.0
+google-cloud
+google-api-python-client
+google-cloud-vision
