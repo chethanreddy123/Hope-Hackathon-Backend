@@ -5,3 +5,4 @@ loguru
 pdf2image
 easyocr
 langchain
+gunicorn==21.2.0
