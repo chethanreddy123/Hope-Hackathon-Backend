@@ -16,6 +16,9 @@ from langchain.chains.conversation.memory import (ConversationBufferMemory,
                                                   ConversationBufferWindowMemory,
                                                   ConversationKGMemory)
 from pymongo.mongo_client import MongoClient
+import google.generativeai as palm
+
+palm.configure(api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
 
 
 app = FastAPI()
