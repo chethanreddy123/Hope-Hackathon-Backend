@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File
 import requests
 from loguru import logger
 from pdf2image import convert_from_path
@@ -10,6 +11,12 @@ from langchain import PromptTemplate, HuggingFaceHub, LLMChain
 import json
 import easyocr
 from typing import List
+from langchain.chains.conversation.memory import (ConversationBufferMemory, 
+                                                  ConversationSummaryMemory, 
+                                                  ConversationBufferWindowMemory,
+                                                  ConversationKGMemory)
+from pymongo.mongo_client import MongoClient
+
 
 app = FastAPI()
 origins = ["*"]
@@ -20,6 +27,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+MongoDB_Key = "mongodb://aioverflow:12345@ac-pu6wews-shard-00-00.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-01.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-02.me4dkct.mongodb.net:27017/?ssl=true&replicaSet=atlas-jcoztp-shard-0&authSource=admin&retryWrites=true&w=majority"
+Data = MongoClient(MongoDB_Key)
+PatientData = Data['HoepHackathon']['PatientData']
 
 
 # Initialize OCR reader
@@ -224,3 +236,45 @@ async def extract_info(files: List[UploadFile] = File(...)):
     return {"extracted_info": extracted_info}
 
 
+@app.post("/generate_summary/")
+def generate_summary(info : dict):
+    req_info = info
+    req_info = dict(req_info)
+    patient_id = req_info['patient_id']
+    date_of_assessment = req_info['DateOfAssessment']
+    logger.info("Got the request for generating summary")
+    result = PatientData.find_one({"Patient_Id" : patient_id , "Assessment.Date" : date_of_assessment})
+    if result is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    NewDict = {}
+    patient_info_keys = [
+        'Patient_Id',
+        'Patient_Name',
+        'Patient_Age',
+        'Patient_Gender',
+        'Patient_Height',
+        'Patient_Weight',
+        'Patient_Contact_No'
+    ]
+    for i in patient_info_keys:
+        NewDict[i] = result[i]
+    for key, value in result['Assessment'][0].items():
+        if type(value) != dict:
+            NewDict[key] = value
+    
+
+    template = '''Act like an expert medical analyst in the domain of physiotherapy.
+    Below is a JSON file containing the assessment data of a specific patient. Write a summary of the patient's condition in approximately 100 words for the senior doctor to continue with the treatment.
+
+    Patient Data in JSON format:
+    {patient_data}
+    '''
+    
+    Palm = GooglePalm(temperature=0, model="models/text-bison-001" , google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+    prompt = PromptTemplate(template=template, input_variables=["patient_data"])
+    llm_chain = LLMChain(prompt=prompt, llm=Palm)
+    res = llm_chain.run(str(NewDict))
+    logger.info("Summary generated successfully")
+
+    return {"summary": res}
