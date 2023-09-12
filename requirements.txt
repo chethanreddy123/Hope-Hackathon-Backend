@@ -13,3 +13,4 @@ google-cloud-vision
 pymongo
 grpcio
 grpcio-tools
+python-multipart==0.0.6
