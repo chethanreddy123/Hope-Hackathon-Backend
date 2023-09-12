@@ -11,3 +11,5 @@ google-api-python-client
 google-generativeai
 google-cloud-vision
 pymongo
+grpcio
+grpcio-tools
