@@ -89,8 +89,6 @@ reader = easyocr.Reader(['en'])
 Palm = GooglePalm(temperature=0, 
                  model="models/text-bison-001", 
                  google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
-
-
 # Initialize LLMChain
 template = '''Extract the desired information from the following passage.
 
@@ -118,7 +116,6 @@ Note: If values or not extracted Make them ''.
 
 
 prompt = PromptTemplate(template=template, input_variables=["raw_text"])
-llm_chain = LLMChain(prompt=prompt, llm=Palm)
 
 properties = {
     'base_url': "https://na-1-dev.api.opentext.com",
@@ -245,8 +242,8 @@ async def process_upload(file: UploadFile = File(...)):
             f.write(await file.read())
         file_name = 'sample.pdf'
 
-    logging.info(f"Processing file: {file_name}")
-    logging.info("access_token: " + access_token)
+    logger.info(f"Processing file: {file_name}")
+    logger.info("access_token: " + access_token)
 
     tme_results = handle_upload_to_risk_guard(access_token, file_name)
  
@@ -276,7 +273,8 @@ async def extract_info(files: List[UploadFile] = File(...)):
         else:
             return {"error": "Unsupported file format"}
         
-        # Run LLMChain
+        # Run LLMChain:
+        llm_chain = LLMChain(prompt=prompt, llm=Palm)
         res = llm_chain.run(raw_string)
         info = json.loads(res)
         extracted_info.append(info)
