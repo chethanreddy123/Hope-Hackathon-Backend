@@ -44,6 +44,11 @@ import json
 from datetime import date
 from bson.timestamp import Timestamp
 import datetime as dt
+import json
+import numpy as np
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from datetime import datetime, timedelta
 
 
 palm.configure(api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
@@ -75,6 +80,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 
 
 MongoDB_Key = "mongodb://aioverflow:12345@ac-pu6wews-shard-00-00.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-01.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-02.me4dkct.mongodb.net:27017/?ssl=true&replicaSet=atlas-jcoztp-shard-0&authSource=admin&retryWrites=true&w=majority"
@@ -221,7 +228,6 @@ def display_pii_data(tme_results):
 
     return pii_data
 
-
 def save_pdf_file(file, filename):
     # Save the uploaded file as 'sample.pdf'
     with open(filename, "wb") as pdf_file:
@@ -252,32 +258,31 @@ async def process_upload(file: UploadFile = File(...)):
 
 
 @app.post("/extract_info/")
-async def extract_info(files: List[UploadFile] = File(...)):
-    extracted_info = []
+async def extract_info(image: UploadFile = File(...)):
+    logger.info("Get Extract info")
 
-    for uploaded_file in files:
-        file_extension = uploaded_file.filename.split(".")[-1]
-        
-        # Save the uploaded file
-        file_path = f"uploads/{uploaded_file.filename}"
-        with open(file_path, "wb") as buffer:
-            buffer.write(uploaded_file.file.read())
-        
-        if file_extension.lower() in ['png', 'jpg', 'jpeg']:
-            result = reader.readtext(file_path)
-            labels = [bbox_label[1] for bbox_label in result]
-            raw_string = ' '.join(labels)
-        elif file_extension.lower() == 'pdf':
-            raw_string = process_pdf(file_path)
-            pass
-        else:
-            return {"error": "Unsupported file format"}
-        
-        # Run LLMChain:
-        llm_chain = LLMChain(prompt=prompt, llm=Palm)
-        res = llm_chain.run(raw_string)
-        info = json.loads(res)
-        extracted_info.append(info)
+    file_extension =  image.filename.split(".")[-1]
+    
+    # Save the uploaded file
+    file_path = f"uploads/{image.filename}"
+    with open(file_path, "wb") as buffer:
+        buffer.write(image.file.read())
+    
+    if file_extension.lower() in ['png', 'jpg', 'jpeg']:
+        result = reader.readtext(file_path)
+        labels = [bbox_label[1] for bbox_label in result]
+        raw_string = ' '.join(labels)
+    elif file_extension.lower() == 'pdf':
+        raw_string = process_pdf(file_path)
+        pass
+    else:
+        return {"error": "Unsupported file format"}
+    extracted_info = []
+    # Run LLMChain:
+    llm_chain = LLMChain(prompt=prompt, llm=Palm)
+    res = llm_chain.run(raw_string)
+    info = json.loads(res)
+    extracted_info.append(info)
     
     return {"extracted_info": extracted_info}
 
@@ -350,47 +355,14 @@ def generate_prescription(info : dict):
             break
 
     template = '''Act like an expert medical analyst in the domain of physiotherapy.
-    Given Below is General Assessment data of a specific patient.
-    Write prescription in the below given schema.
+    Below is a JSON file containing the assessment data of a specific patient.
+    Write a short summary (200 words) for the same:
 
     Patient General Assessment in JSON format:
     {gen_assessment}
-
-    Output Schema:
-
-    schema = {{
-        "properties": {{
-            "DateOfAssessment": {{"type": "string", "format": "date"}},
-            "diagnosis": {{"type": "string"}},
-            "reviewNext": {{"type": "string", "format": "date"}},
-            "treatmentPlan": {{"type": "string"}},
-            "numberOfDays": {{"type": "string"}},
-            "contraindication": {{"type": "string"}},
-            "followUp": {{"type": "string"}},
-            "homeAdvice": {{"type": "string"}},
-            "exercises": {{
-                "type": "array",
-                "items": {{
-                    "type": "object",
-                    "properties": {{
-                        "SrNo": {{"type": "integer"}},
-                        "NameOfExercise": {{"type": "string"}},
-                        "Reps": {{"type": "string"}},
-                        "Sets": {{"type": "string"}},
-                        "NoOfDays": {{"type": "integer"}},
-                        "NextReview": {{"type": "string", "format": "date"}}
-                    }},
-                    "required": ["SrNo", "NameOfExercise", "Reps", "Sets", "NoOfDays", "NextReview"]
-                }}
-            }}
-        }}
-    }}
-
     '''
-
-
     Palm = GooglePalm(temperature=0, 
-                     model="models/chat-bison-001" , 
+                     model="models/text-bison-001" , 
                      google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
 
 
@@ -401,11 +373,45 @@ def generate_prescription(info : dict):
         llm=Palm
     )
 
-    # logger.info(current_ass['SeniorDoctorPrescription']['GeneralAssessment'])
-    finalAss = str(current_ass['SeniorDoctorPrescription']['GeneralAssessment']).replace("{" , "").replace("}" , "").replace("\n" , "")
+    genSum = llm_chain.run(str(current_ass))
 
-    logger.info(finalAss)
-    res = llm_chain.run(finalAss)
+
+    template = '''Act like an expert medical analyst in the domain of physiotherapy.
+        Below is summary of general assessment of a specific patient.
+        Write prescription (list attributes given below) for this patient.
+
+        [
+            "DateOfAssessment",
+            "diagnosis",
+            "reviewNext",
+            "treatmentPlan",
+            "numberOfDays",
+            "contraindication",
+            "followUp",
+            "homeAdvice",
+            "exercises"
+        ]
+
+
+        Patient General Assessment:
+        {gen_assessment}
+
+    '''
+    Palm = GooglePalm(temperature=0, 
+                         model="models/text-bison-001" , 
+                         google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+
+
+    prompt = PromptTemplate(template=template, input_variables=["gen_assessment"])
+
+    llm_chain = LLMChain(
+        prompt=prompt,
+        llm=Palm
+    )
+
+    res = llm_chain.run(str(genSum).replace("*" , ""))
+    
+    return res
 
 
 
@@ -1982,6 +1988,44 @@ def app_login(info : dict):
         return False
 
 
+def NewPredictPain(data):
+
+    # Step 2: Extract the dates and pain scales
+    dates = [entry["Date"] for entry in data["DayWise"]]
+    pain_scales = [int(entry["PainScale"]) for entry in data["DayWise"]]
+
+    # Step 3: Convert the dates to numeric values
+    start_date = datetime.strptime(dates[len(dates) - 1], "%Y-%m-%d")
+    numeric_dates = [(datetime.strptime(date, "%Y-%m-%d") - start_date).days for date in dates]
+
+    # Step 4: Fit a polynomial regression model
+    degree = 2  # Choose the degree of the polynomial
+    poly_features = PolynomialFeatures(degree=degree)
+    X_poly = poly_features.fit_transform(np.array(numeric_dates).reshape(-1, 1))
+
+    model = LinearRegression()
+    model.fit(X_poly, pain_scales)
+
+    # Step 5: Predict the pain for the next day
+    next_date = (start_date + timedelta(days=2)).strftime("%Y-%m-%d")
+    next_numeric_date = len(dates)
+
+    next_pain_prediction = model.predict(poly_features.transform([[next_numeric_date]]))[0]
+
+    # Step 6: Add the new entry to the JSON data
+    new_entry = {
+        "Date": next_date,
+        "PainScale": str(int(round(next_pain_prediction))),
+        "Comments": ""
+    }
+
+    data["DayWise"].append(new_entry)
+
+
+    return data['DayWise']
+
+
+
 @app.post("/app/ViewPatientData")
 def ViewPatientData(info : dict):
     req_info = info
@@ -2044,7 +2088,7 @@ def ViewPatientData(info : dict):
             "DayWise" : assessment["JuniorDoctorPrescription"]["DayWise"]
         }
 
-        print(assessment)
+ 
 
         
 
@@ -2057,10 +2101,16 @@ def ViewPatientData(info : dict):
                     if exercise['Title'] == exercise_name:
                         exercise_entry['Link'] = exercise['Link']
                         break
+        if len(latest_assessment['DayWise']) != 0:
+            latest_assessment['DayWise'] = NewPredictPain(latest_assessment)
+
 
         return {"patient_details" : patient_details, "latest_assessment" : latest_assessment}
     else:
         return None
+    
+
+
 
 
 
