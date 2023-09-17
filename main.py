@@ -362,54 +362,55 @@ def generate_prescription(info : dict):
         llm=Palm
     )
     current_ass = str(current_ass)
-    current_ass = current_ass.replace("{" , "").replace("}" , "")
-    # # logger.info(str(current_ass))
+    current_ass = current_ass.replace("{" , "").replace("}" , "").replace("'" , "")
+    # logger.info(str(current_ass))
 
-    # genSum = llm_chain.run(current_ass)
+    genSum = llm_chain.run(current_ass)
 
-    # logger.info(genSum)
-
-
-    # template = '''Act like an expert medical analyst in the domain of physiotherapy.
-    #     Below is summary of general assessment of a specific patient.
-    #     Write prescription (list attributes given below) for this patient.
-
-    #     [
-    #         "DateOfAssessment",
-    #         "diagnosis",
-    #         "reviewNext",
-    #         "treatmentPlan",
-    #         "numberOfDays",
-    #         "contraindication",
-    #         "followUp",
-    #         "homeAdvice",
-    #         "exercises"
-    #     ]
+    logger.info(genSum)
 
 
-    #     Patient General Assessment:
-    #     {gen_assessment}
+    template = '''Act like an expert medical analyst in the domain of physiotherapy.
+        Below is summary of general assessment of a specific patient.
+        Write prescription (list attributes given below) for this patient.
 
-    # '''
-    # Palm = GooglePalm(temperature=0, 
-    #                      model="models/text-bison-001" , 
-    #                      google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+        List of Attributes:
+
+        [
+            "DateOfAssessment",
+            "diagnosis",
+            "reviewNext",
+            "treatmentPlan",
+            "numberOfDays",
+            "contraindication",
+            "followUp",
+            "homeAdvice",
+            "exercises"
+        ]
 
 
-    # prompt = PromptTemplate(template=template, input_variables=["gen_assessment"])
+        Patient General Assessment:
+        {gen_assessment}
 
-    # llm_chain = LLMChain(
-    #     prompt=prompt,
-    #     llm=Palm
-    # )
+    '''
+    Palm = GooglePalm(temperature=0, 
+                         model="models/text-bison-001" , 
+                         google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
 
-    # res = llm_chain.run(str(genSum).replace("*" , ""))
+
+    prompt = PromptTemplate(template=template, input_variables=["gen_assessment"])
+
+    llm_chain = LLMChain(
+        prompt=prompt,
+        llm=Palm
+    )
+
+    res = llm_chain.run(str(genSum).replace("*" , ""))
+    logger.info(genSum)
     
-    # return res
-
-    res = '''"**Prescription**\n\n   **Date of Assessment:** 2023-08-05\n\n   **Diagnosis:** Tension headache\n\n   **Review Next:** 2023-08-12\n\n   **Treatment Plan:**\n\n   * Pain medication (e.g., ibuprofen, acetaminophen)\n   * Muscle relaxants (e.g., cyclobenzaprine, diazepam)\n   * Heat therapy\n   * Ice therapy\n   * Massage therapy\n   * Exercise therapy\n\n   **Number of Days:** 10-14 days\n\n   **Contraindications:**\n\n   * Allergy to any of the medications or treatments\n   * Pregnancy\n   * Breast-feeding\n   * Other medical conditions that may be affected by the medications or treatments\n\n   **Follow-Up:**\n\n   * The patient should follow up with their doctor if their symptoms do not improve or if they have any new symptoms.\n\n   **Home Advice:**\n\n   * The patient should avoid activities that aggravate their headache, such as stress, caffeine, and alcohol.\n   * The patient should get plenty of rest.\n   * The patient should drink plenty of fluids.\n   * The patient should eat a healthy diet.\n\n   **Exercises:**\n\n   * The patient should do gentle exercises, such as walking, swimming, or yoga.\n   * The patient should avoid strenuous exercises."'''
-
     return res
+
+
 
 
 
