@@ -412,6 +412,26 @@ def generate_prescription(info : dict):
 
 
 
+@app.post("/upload_pdf/")
+async def upload_pdf(file: UploadFile = File(...)):
+    url = 'https://css.na-1-dev.api.opentext.com/v2/content'
+    access_token = get_auth_token()  # Replace with your actual access token
+    user_dir = 'uploads'  # Replace with your desired user directory
+
+    headers = {
+        'Authorization': f'Bearer {access_token}'
+    }
+
+    files = {
+        'file': (file.filename, file.file.read())
+    }
+
+    response = requests.post(url, headers=headers, files=files, verify=False)
+
+    if response.status_code == 200:
+        return {"message": "File uploaded successfully."}
+    else:
+        raise HTTPException(status_code=response.status_code, detail=f"Error uploading file. Status code: {response.status_code}")
 
 
 
