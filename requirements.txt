@@ -20,3 +20,5 @@ plotly
 reportlab
 kaleido
 typing
+PyPDF2==3.0.1
+scikit-learn==1.3.0

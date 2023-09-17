@@ -1,28 +1,27 @@
+ 
+# Importing all the necessary libraries
+
+import re
+import math
+import pymongo
 from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi import FastAPI, HTTPException, UploadFile, File
-import requests
-from loguru import logger
-from pdf2image import convert_from_path
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, HTTPException
+from collections import Counter
+from urllib import request
+import pandas as pd
 from langchain.llms import GooglePalm
-from langchain import PromptTemplate, LLMChain
+from langchain import PromptTemplate, HuggingFaceHub, LLMChain
+from fastapi import FastAPI, Request, Query
+from fastapi.middleware.cors import CORSMiddleware
+import google.generativeai as palm
 import json
 import easyocr
-import os
-from pymongo.mongo_client import MongoClient
-import google.generativeai as palm
-import re
-import pymongo
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import json
 import subprocess
 from reportgenerator import create_pdf_discharge
 from fastapi.responses import FileResponse
+from fastapi.encoders import jsonable_encoder
 from pymongo.mongo_client import MongoClient
-from fastapi import File, UploadFile
+import joblib
 from fastapi import Response, BackgroundTasks
 import random as rd
 import datetime
@@ -30,19 +29,14 @@ from loguru import logger
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import StreamingResponse
 from pymongo import MongoClient
-from typing import List
+from typing import List, Optional
+import json
 from datetime import date
 from bson.timestamp import Timestamp
 import datetime as dt
-import json
-import numpy as np
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
-from datetime import datetime, timedelta
-from PyPDF2 import PdfReader
 
-palm.configure(api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
 
+# mongoDB connection keys for both local and cloud
 
 
 Key_Mongo_Cloud = "mongodb://aioverflow:12345@ac-pu6wews-shard-00-00.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-01.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-02.me4dkct.mongodb.net:27017/?ssl=true&replicaSet=atlas-jcoztp-shard-0&authSource=admin&retryWrites=true&w=majority"
@@ -61,6 +55,8 @@ billData = Data['HoepHackathon']['Bills']
 currId = Data['HoepHackathon']['PatientID']
 
 
+# creating fastapi instance
+
 app = FastAPI()
 origins = ["*"]
 app.add_middleware(
@@ -70,353 +66,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-
-
-MongoDB_Key = "mongodb://aioverflow:12345@ac-pu6wews-shard-00-00.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-01.me4dkct.mongodb.net:27017,ac-pu6wews-shard-00-02.me4dkct.mongodb.net:27017/?ssl=true&replicaSet=atlas-jcoztp-shard-0&authSource=admin&retryWrites=true&w=majority"
-Data = MongoClient(MongoDB_Key)
-PatientData = Data['HoepHackathon']['PatientData']
-
-
-# Initialize OCR reader
-reader = easyocr.Reader(['en'])
-
-# Initialize GooglePalm
-Palm = GooglePalm(temperature=0, 
-                 model="models/text-bison-001", 
-                 google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
-# Initialize LLMChain
-template = '''Extract the desired information from the following passage.
-
-Only extract the properties mentioned in the 'information_extraction' function.
-
-Passage:
-{raw_text}
-
-schema = {{
-    "properties" : {{
-        "name" : {{"type" : "string"}},
-        "email" : {{"type" : "string"}},
-        "age" : {{"type" : "string"}},
-        "height" : {{"type" : "integer"}},
-        "weight" : {{"type" : "integer"}},
-        "phone" : {{"type" : "integer"}},
-        "gender" : {{"type" : "string"}},
-        "address" : {{"type" : "string"}}
-    }},
-    "required" : ["name" , "email" , "age" , "height" , "weight" , "phone" , "gender" , "address"]
-}}
-
-Note: If values or not extracted Make them ''.
-'''
-
-
-prompt = PromptTemplate(template=template, input_variables=["raw_text"])
-
-properties = {
-    'base_url': "https://na-1-dev.api.opentext.com",
-    'css_url': "https://css.na-1-dev.api.opentext.com",
-    'tenant_id': "86581e21-636f-4e1d-8336-061ddcd9293a",
-    'username': "aioverflow.ml@gmail.com",
-    'password': "!$hQPPh7HJnpC.7",
-    'client_id': "eph2Is82hQZ6ltgrP4NjLgBuM96261Fv",
-    'client_secret': "0p5Pz6MaHEThN1MV"
-}
-
-def process_pdf(file_path):
-    logger.info(file_path)
-    images = convert_from_path("mypdf.pdf", 500,poppler_path=file_path)
-    for i, image in enumerate(images):
-        fname = 'image'+str(i)+'.png'
-        image.save(fname, "PNG")
-    raw_string = ""
-    for i, image in enumerate(images):
-        image.save(f'page{i}.jpg', 'JPEG')
-        result = reader.readtext(f'page{i}.jpg')
-        labels = [bbox_label[1] for bbox_label in result]
-        raw_string += ' '.join(labels)
-    return raw_string
-
-def get_auth_token():
-    print("...Requesting New Authentication Token")
-
-    url = f"{properties['base_url']}/tenants/{properties['tenant_id']}/oauth2/token"
-    headers = {
-        'Content-Type': 'application/json'
-    }
-    payload = {
-        'client_id': properties['client_id'],
-        'client_secret': properties['client_secret'],
-        'grant_type': "client_credentials",
-        'username': properties['username'],
-        'password': properties['password']
-    }
-
-    try:
-        response = requests.post(url, headers=headers, json=payload)
-
-        if not response.ok:
-            print("Error acquiring authentication token")
-            print("Authentication Failed. Please verify your credentials in properties.py")
-            return
-
-        data = response.json()
-        return data['access_token']
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-def handle_upload_to_risk_guard(accessToken, file):
-    piiData = ""
-    piiDataPlaceholder = ""
-    tmeResults = ""
-
-    if not accessToken:
-        print("Missing Authentication Token")
-        return
-
-    print("...Processing Text Mining")
-
-    formData = {'File': ('sample.pdf', open('sample.pdf', 'rb'), 'application/pdf')}
-
-    headers = { 
-        'Authorization': f'Bearer {accessToken}', 
-        'Accept': 'application/json'
-    }
-
-    response = requests.post(
-        f'{properties["base_url"]}/mtm-riskguard/api/v1/process',
-        headers=headers,
-        files=formData
-    )
-
-    if response.status_code == 200:
-        data = response.json()
-        if not data.get('results', {}).get('tme', {}).get('result'):
-            print("...No searchable PII data found")
-            return
-        print(f'...{data["header"]["status"]["description"]}')
-        tmeResults = data
-        return tmeResults
-    elif response.status_code == 401:
-        print("...Authentication Token has expired. Please obtain a new token.")
-    else:
-        print(f'...Error: {response.text}')
-            
-def display_pii_data(tme_results):
-    pii_data = ""
-    pii_data_placeholder = ""
-
-    if len(tme_results) == 0:
-        pii_data_placeholder = "...No PII data to display"
-    else:
-        for extracted_term in tme_results:
-            cartridge_id = extracted_term['CartridgeID']
-            subterm_value = extracted_term['Subterms']['Subterm'][0]['value']
-            pii_data += f'{cartridge_id} = {subterm_value}\n'
-
-    return pii_data
-
-def save_pdf_file(file, filename):
-    # Save the uploaded file as 'sample.pdf'
-    with open(filename, "wb") as pdf_file:
-        pdf_file.write(file.read())
-
-@app.post("/process_upload/")
-async def process_upload(file: UploadFile = File(...)):
-    access_token = get_auth_token()
-    if not access_token:
-        return JSONResponse(content={"error": "Error acquiring authentication token"}, status_code=500)
-
-    # Get the file name
-    file_name = file.filename
-
-    # If the file is not in PDF format, save it as sample.pdf
-    if not file_name.endswith('.pdf'):
-        with open('sample.pdf', 'wb') as f:
-            f.write(await file.read())
-        file_name = 'sample.pdf'
-
-    logger.info(f"Processing file: {file_name}")
-    logger.info("access_token: " + access_token)
-
-    tme_results = handle_upload_to_risk_guard(access_token, file_name)
- 
-
-    return tme_results
-
-
-@app.post("/extract_info/")
-async def extract_info(image: UploadFile = File(...)):
-    logger.info("Get Extract info")
-
-    file_extension =  image.filename.split(".")[-1]
-    
-    # Save the uploaded file
-    file_path = f"uploads/{image.filename}"
-    with open(file_path, "wb") as buffer:
-        buffer.write(image.file.read())
-    
-    if file_extension.lower() in ['png', 'jpg', 'jpeg']:
-        result = reader.readtext(file_path)
-        labels = [bbox_label[1] for bbox_label in result]
-        raw_string = ' '.join(labels)
-    elif file_extension.lower() == 'pdf':
-        raw_string = process_pdf(file_path)
-        pass
-    else:
-        return {"error": "Unsupported file format"}
-    extracted_info = []
-    # Run LLMChain:
-    llm_chain = LLMChain(prompt=prompt, llm=Palm)
-    res = llm_chain.run(raw_string)
-    info = json.loads(res)
-    extracted_info.append(info)
-    
-    return {"extracted_info": extracted_info}
-
-@app.post("/generate_summary/")
-def generate_summary(info : dict):
-
-    req_info = info
-    req_info = dict(req_info)
-    patient_id = req_info['patient_id']
-    date_of_assessment = req_info['DateOfAssessment']
-    logger.info("Got the request for generating summary")
-    result = PatientData.find_one({"Patient_Id" : patient_id , "Assessment.Date" : date_of_assessment})
-    if result is None:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    
-    NewDict = {}
-    patient_info_keys = [
-        'Patient_Id',
-        'Patient_Name',
-        'Patient_Age',
-        'Patient_Gender',
-        'Patient_Height',
-        'Patient_Weight',
-        'Patient_Contact_No'
-    ]
-
-    current_ass = None
-    for i in result['Assessment']:
-        if i['Date'] == date_of_assessment:
-            current_ass = i
-            break
-    for i in patient_info_keys:
-        NewDict[i] = result[i]
-    for key, value in current_ass.items():
-        if type(value) != dict:
-            NewDict[key] = value
-    
-
-    template = '''Act like an expert medical analyst in the domain of physiotherapy.
-    Below is a JSON file containing the assessment data of a specific patient. Write a summary of the patient's condition in approximately 100 words for the senior doctor to continue with the treatment.
-
-    Patient Data in JSON format:
-    {patient_data}
-    '''
-    
-    Palm = GooglePalm(temperature=0, model="models/text-bison-001" , google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
-    prompt = PromptTemplate(template=template, input_variables=["patient_data"])
-    llm_chain = LLMChain(prompt=prompt, llm=Palm)
-    res = llm_chain.run(str(NewDict))
-    logger.info("Summary generated successfully")
-
-    return {"summary": res}
-
-@app.post("/generate_prescription/")
-def generate_prescription(info : dict):
-    req_info = info
-    req_info = dict(req_info)
-    patient_id = req_info['patient_id']
-    date_of_assessment = req_info['DateOfAssessment']
-    logger.info("Got the request for generating prescription")
-    result = PatientData.find_one({"Patient_Id" : patient_id , "Assessment.Date" : date_of_assessment})
-
-    if result is None:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    current_ass = None
-    for i in result['Assessment']:
-        if i['Date'] == date_of_assessment:
-            current_ass = i
-            break
-
-    template = '''Act like an expert medical analyst in the domain of physiotherapy.
-    Below is the assessment data of a specific patient.
-    Write a short summary (200 words) for the same:
-
-    Patient General Assessment:
-    {gen_assessment}
-    '''
-    Palm = GooglePalm(temperature=0, 
-                     model="models/text-bison-001" , 
-                     google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
-
-
-    prompt = PromptTemplate(template=template, input_variables=["gen_assessment"])
-    logger.info(prompt)
-    llm_chain = LLMChain(
-        prompt=prompt,
-        llm=Palm
-    )
-    current_ass = str(current_ass)
-    current_ass = current_ass.replace("{" , "").replace("}" , "")
-    # # logger.info(str(current_ass))
-
-    # genSum = llm_chain.run(current_ass)
-
-    # logger.info(genSum)
-
-
-    # template = '''Act like an expert medical analyst in the domain of physiotherapy.
-    #     Below is summary of general assessment of a specific patient.
-    #     Write prescription (list attributes given below) for this patient.
-
-    #     [
-    #         "DateOfAssessment",
-    #         "diagnosis",
-    #         "reviewNext",
-    #         "treatmentPlan",
-    #         "numberOfDays",
-    #         "contraindication",
-    #         "followUp",
-    #         "homeAdvice",
-    #         "exercises"
-    #     ]
-
-
-    #     Patient General Assessment:
-    #     {gen_assessment}
-
-    # '''
-    # Palm = GooglePalm(temperature=0, 
-    #                      model="models/text-bison-001" , 
-    #                      google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
-
-
-    # prompt = PromptTemplate(template=template, input_variables=["gen_assessment"])
-
-    # llm_chain = LLMChain(
-    #     prompt=prompt,
-    #     llm=Palm
-    # )
-
-    # res = llm_chain.run(str(genSum).replace("*" , ""))
-    
-    # return res
-
-    res = '''"**Prescription**\n\n   **Date of Assessment:** 2023-08-05\n\n   **Diagnosis:** Tension headache\n\n   **Review Next:** 2023-08-12\n\n   **Treatment Plan:**\n\n   * Pain medication (e.g., ibuprofen, acetaminophen)\n   * Muscle relaxants (e.g., cyclobenzaprine, diazepam)\n   * Heat therapy\n   * Ice therapy\n   * Massage therapy\n   * Exercise therapy\n\n   **Number of Days:** 10-14 days\n\n   **Contraindications:**\n\n   * Allergy to any of the medications or treatments\n   * Pregnancy\n   * Breast-feeding\n   * Other medical conditions that may be affected by the medications or treatments\n\n   **Follow-Up:**\n\n   * The patient should follow up with their doctor if their symptoms do not improve or if they have any new symptoms.\n\n   **Home Advice:**\n\n   * The patient should avoid activities that aggravate their headache, such as stress, caffeine, and alcohol.\n   * The patient should get plenty of rest.\n   * The patient should drink plenty of fluids.\n   * The patient should eat a healthy diet.\n\n   **Exercises:**\n\n   * The patient should do gentle exercises, such as walking, swimming, or yoga.\n   * The patient should avoid strenuous exercises."'''
-
-    return res
-
-
-
-
-######  All Routes Related to Doctors, and Trainers and Recpetionists"  ##############
-
-
 
 ### ----- General Functions ---------- #####3
 
@@ -550,6 +199,200 @@ def create_id():
     update_latest_id(new_id)
 
     return new_id
+
+### OpenText and LLM Routes #####
+
+reader = easyocr.Reader(['en'])
+
+# Initialize GooglePalm
+Palm = GooglePalm(temperature=0, 
+                 model="models/text-bison-001", 
+                 google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+
+@app.post("/extract_info/")
+async def extract_info(image: UploadFile = File(...)):
+    logger.info("Get Extract info")
+
+    file_extension =  image.filename.split(".")[-1]
+    
+    # Save the uploaded file
+    file_path = f"uploads/{image.filename}"
+    with open(file_path, "wb") as buffer:
+        buffer.write(image.file.read())
+    
+    if file_extension.lower() in ['png', 'jpg', 'jpeg']:
+        result = reader.readtext(file_path)
+        labels = [bbox_label[1] for bbox_label in result]
+        raw_string = ' '.join(labels)
+    else:
+        return {"error": "Unsupported file format"}
+    extracted_info = []
+    # Run LLMChain:
+    # Initialize LLMChain
+    template = '''Extract the desired information from the following passage.
+
+    Only extract the properties mentioned in the 'information_extraction' function.
+
+    Passage:
+    {raw_text}
+
+    schema = {{
+        "properties" : {{
+            "name" : {{"type" : "string"}},
+            "email" : {{"type" : "string"}},
+            "age" : {{"type" : "string"}},
+            "height" : {{"type" : "integer"}},
+            "weight" : {{"type" : "integer"}},
+            "phone" : {{"type" : "integer"}},
+            "gender" : {{"type" : "string"}},
+            "address" : {{"type" : "string"}}
+        }},
+        "required" : ["name" , "email" , "age" , "height" , "weight" , "phone" , "gender" , "address"]
+    }}
+
+    Note: If values or not extracted Make them ''.
+    '''
+
+    prompt = PromptTemplate(template=template, input_variables=["raw_text"])
+
+    llm_chain = LLMChain(prompt=prompt, llm=Palm)
+    res = llm_chain.run(raw_string)
+    info = json.loads(res)
+    extracted_info.append(info)
+    
+    return {"extracted_info": extracted_info}
+
+@app.post("/generate_prescription/")
+def generate_prescription(info : dict):
+    req_info = info
+    req_info = dict(req_info)
+    patient_id = req_info['patient_id']
+    date_of_assessment = req_info['DateOfAssessment']
+    logger.info("Got the request for generating prescription")
+    result = PatientData.find_one({"Patient_Id" : patient_id , "Assessment.Date" : date_of_assessment})
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    current_ass = None
+    for i in result['Assessment']:
+        if i['Date'] == date_of_assessment:
+            current_ass = i
+            break
+
+    template = '''Act like an expert medical analyst in the domain of physiotherapy.
+    Below is a JSON file containing the assessment data of a specific patient.
+    Write a short summary (200 words) for the same:
+
+    Patient General Assessment in JSON format:
+    {gen_assessment}
+    '''
+    Palm = GooglePalm(temperature=0, 
+                     model="models/text-bison-001" , 
+                     google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+
+
+    prompt = PromptTemplate(template=template, input_variables=["gen_assessment"])
+
+    llm_chain = LLMChain(
+        prompt=prompt,
+        llm=Palm
+    )
+
+    genSum = llm_chain.run(str(current_ass))
+
+
+    template = '''Act like an expert medical analyst in the domain of physiotherapy.
+        Below is summary of general assessment of a specific patient.
+        Write prescription (list attributes given below) for this patient.
+
+        [
+            "DateOfAssessment",
+            "diagnosis",
+            "reviewNext",
+            "treatmentPlan",
+            "numberOfDays",
+            "contraindication",
+            "followUp",
+            "homeAdvice",
+            "exercises"
+        ]
+
+
+        Patient General Assessment:
+        {gen_assessment}
+
+    '''
+    Palm = GooglePalm(temperature=0, 
+                         model="models/text-bison-001" , 
+                         google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+
+
+    prompt = PromptTemplate(template=template, input_variables=["gen_assessment"])
+
+    llm_chain = LLMChain(
+        prompt=prompt,
+        llm=Palm
+    )
+
+    res = llm_chain.run(str(genSum).replace("*" , ""))
+    
+    return res
+
+@app.post("/generate_summary/")
+def generate_summary(info : dict):
+
+    req_info = info
+    req_info = dict(req_info)
+    patient_id = req_info['patient_id']
+    date_of_assessment = req_info['DateOfAssessment']
+    logger.info("Got the request for generating summary")
+    result = PatientData.find_one({"Patient_Id" : patient_id , "Assessment.Date" : date_of_assessment})
+    if result is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    NewDict = {}
+    patient_info_keys = [
+        'Patient_Id',
+        'Patient_Name',
+        'Patient_Age',
+        'Patient_Gender',
+        'Patient_Height',
+        'Patient_Weight',
+        'Patient_Contact_No'
+    ]
+
+    current_ass = None
+    for i in result['Assessment']:
+        if i['Date'] == date_of_assessment:
+            current_ass = i
+            break
+    for i in patient_info_keys:
+        NewDict[i] = result[i]
+    for key, value in current_ass.items():
+        if type(value) != dict:
+            NewDict[key] = value
+    
+
+    template = '''Act like an expert medical analyst in the domain of physiotherapy and content analyser.
+    Below is a JSON file containing the assessment data of a specific patient. 
+    Write a summary of the patient's condition (in paragraph) in approximately 100 words 
+    for the senior doctor to continue with the treatment.
+
+    Patient Data in JSON format:
+    {patient_data}
+
+    Output: Summary of about 100 words
+    '''
+
+    logger.info(NewDict)
+    
+    Palm = GooglePalm(temperature=0, model="models/text-bison-001" , google_api_key="AIzaSyA1fu-ob27CzsJozdr6pHd96t5ziaD87wM")
+    prompt = PromptTemplate(template=template, input_variables=["patient_data"])
+    llm_chain = LLMChain(prompt=prompt, llm=Palm)
+    res = llm_chain.run(str(NewDict))
+    logger.info("Summary generated successfully")
+
+    return {"summary": res}
 
 
 ############### --------------------------- Login Routes ---------------------------- ##############
@@ -1986,44 +1829,6 @@ def app_login(info : dict):
         return False
 
 
-def NewPredictPain(data):
-
-    # Step 2: Extract the dates and pain scales
-    dates = [entry["Date"] for entry in data["DayWise"]]
-    pain_scales = [int(entry["PainScale"]) for entry in data["DayWise"]]
-
-    # Step 3: Convert the dates to numeric values
-    start_date = datetime.strptime(dates[len(dates) - 1], "%Y-%m-%d")
-    numeric_dates = [(datetime.strptime(date, "%Y-%m-%d") - start_date).days for date in dates]
-
-    # Step 4: Fit a polynomial regression model
-    degree = 2  # Choose the degree of the polynomial
-    poly_features = PolynomialFeatures(degree=degree)
-    X_poly = poly_features.fit_transform(np.array(numeric_dates).reshape(-1, 1))
-
-    model = LinearRegression()
-    model.fit(X_poly, pain_scales)
-
-    # Step 5: Predict the pain for the next day
-    next_date = (start_date + timedelta(days=2)).strftime("%Y-%m-%d")
-    next_numeric_date = len(dates)
-
-    next_pain_prediction = model.predict(poly_features.transform([[next_numeric_date]]))[0]
-
-    # Step 6: Add the new entry to the JSON data
-    new_entry = {
-        "Date": next_date,
-        "PainScale": str(int(round(next_pain_prediction))),
-        "Comments": ""
-    }
-
-    data["DayWise"].append(new_entry)
-
-
-    return data['DayWise']
-
-
-
 @app.post("/app/ViewPatientData")
 def ViewPatientData(info : dict):
     req_info = info
@@ -2086,7 +1891,7 @@ def ViewPatientData(info : dict):
             "DayWise" : assessment["JuniorDoctorPrescription"]["DayWise"]
         }
 
- 
+        print(assessment)
 
         
 
@@ -2099,100 +1904,15 @@ def ViewPatientData(info : dict):
                     if exercise['Title'] == exercise_name:
                         exercise_entry['Link'] = exercise['Link']
                         break
-        if len(latest_assessment['DayWise']) != 0:
-            latest_assessment['DayWise'] = NewPredictPain(latest_assessment)
-
 
         return {"patient_details" : patient_details, "latest_assessment" : latest_assessment}
     else:
         return None
-    
-def clean_text(raw_text):
-    # Add your custom cleaning logic here
-    cleaned_text = re.sub(r'\n+', '\n', raw_text)
-    return cleaned_text
-
-def extract_text_from_pdf(pdf_path):
-    reader = easyocr.Reader(['en'])
-    result = []
-
-    try:
-        result = reader.readtext(pdf_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
-
-    return result
-
-
-
-
-
-@app.post("/analyse_doc/")
-def upload_file(file: UploadFile):
-
-    # Save the uploaded file as "sample.pdf"
-    with open("sample.pdf", "wb") as dest_file:
-        dest_file.write(file.file.read())
-
-    reader = PdfReader('sample.pdf')
-    no_pages = len(reader.pages)
-    text = ""
-    for i in range(no_pages):
-        page = reader.pages[0]
-        text = text + " " + page.extract_text()
-
-    os.remove("sample.pdf")
-
-    # Initialize LLMChain
-    template = '''
-    Please function as an expert document analyzer and physiotherapist, 
-    providing concise summaries for the extracted text from the documents in about 50 words.
-
-    raw_text extracted from document: {raw_text}
-    '''
-
-    prompt = PromptTemplate(template=template, input_variables=["raw_text"])
-    llm_chain = LLMChain(prompt=prompt, llm=Palm)
-    res = llm_chain.run(text)
-    return res
-
-@app.post("/upload_doc/")
-def upload_doc(info : dict):
-    req_info = info
-    req_info = dict(req_info)
-
-    SearchKey = req_info['Patient_Id']
-    Find = PatientData.find_one({'Patient_Id' : SearchKey})
-    if Find == None:
-        return {"status" : "Patient Not Found"}
-    else:
-        PatientData.update_one({'Patient_Id' : SearchKey}, 
-                               {"$set" : {"docs" : req_info['doc']}})
-        return {"status" : "Successful"}
-
-
-
-
-
-
-
-
-
 
 
 
 
 
 ################ ------------------- End of all the routes ------------------ #####################
-
-
-
-
-
-
-
-    
-
-
 
 
