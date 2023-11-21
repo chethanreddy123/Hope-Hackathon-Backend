@@ -1,6 +1,3 @@
-# Hope-Hackathon-Backend
-
-
 # Med-Ez Backend Server
 
 This repository contains the backend code for the Med-Ez project, a comprehensive healthcare management system. The backend server is built using FastAPI and can be launched using the Uvicorn ASGI server.
